@@ -1,0 +1,117 @@
+fragment CatFragment on Cat {
+  id
+  name
+  gender
+  bodyConditionScore
+  dob
+  reproductiveStatus
+  inactiveAt
+  activityState {
+    catNotSeenWarning
+    mostRecentEvent
+    lastActivated
+    __typename
+  }
+  events(sort: START_TIME_ASC, first: 1, from: "2020-01-01T00:00:00.000Z") {
+    edges {
+      node {
+        startTime
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+  pedtResults(first: 1, filters: {isTriggered: true, isSeen: false}) {
+    pageInfo {
+      totalCount
+      __typename
+    }
+    edges {
+      node {
+        rule {
+          ruleType
+          subtype
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+  customFields(cfNamePrefix: "app__") {
+    name
+    value
+    __typename
+  }
+  recommendationRecords(productTypes: [FOOD]) {
+    time
+    productId
+    productName
+    imageUrl
+    pffRecommendationId
+    productType
+    __typename
+  }
+  __typename
+}
+
+fragment machineFragment on Machine {
+  id
+  sn
+  name
+  batteryPercentage
+  showBatteryWarning
+  firmwareUpgradeAvailable
+  stFirmwareRevision
+  espFirmwareRevision
+  wifiRssi
+  powerMode
+  isFrozen
+  mostRecentUploadAt
+  mostRecentUploadWarning
+  isDirty
+  balancedStatus
+  customFields(cfNamePrefix: "app__") {
+    name
+    value
+    __typename
+  }
+  eliminationEvents(sinceLastMaintenanceEvent: true) {
+    startTime
+    normalisedClassification {
+      isCat
+      isElimination
+      elimType
+      cat {
+        id
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+query RetrievePetsMachine($jwt: String) {
+  authenticate(jwt: $jwt) {
+    myHousehold {
+      cats {
+        ...CatFragment
+        reproductiveStatusAlteredAtBirth
+        species
+        __typename
+        preExistingConditions
+        activityLevel
+      }
+      machines(filters: {isFrozen: false}) {
+        ...machineFragment
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
