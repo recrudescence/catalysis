@@ -1,0 +1,68 @@
+fragment pedtResultFragment on PEDTResult {
+  cat {
+    id
+    name
+    inactiveAt
+  }
+  id
+  period
+  startDate
+  endDate
+  rule {
+    ruleType
+    subtype
+  }
+  metadata {
+    ... on WeightResultMetadata {
+      startWeight
+      endWeight
+      percentageChange
+    }
+    ... on VisitResultMetadata {
+      visitFrequency
+      visitThreshold
+    }
+    ... on AverageVisitChangeMetadata {
+      currentPeriodLength
+      currentPeriodAverage
+      rollingPeriodLength
+      rollingPeriodAverage
+      visitType
+    }
+    ... on CumulativeVisitChangeMetadata {
+      currentPeriodLength
+      currentPeriodSum
+      rollingPeriodLength
+      rollingPeriodAverage
+      visitType
+    }
+  }
+  seenByUser
+  priority
+  generatedAt
+}
+
+query RetrieveCatPedtResults($jwt: String, $catId: ID!, $beforeEndDate: Date!, $afterEndDate: Date!, $page: Int!, $perPage: Int!) {
+  authenticate(jwt: $jwt) {
+    node(id: $catId) {
+      ... on Cat {
+        pedtResults(
+          sort: [END_DATE_DESC, PRIORITY_ASC]
+          page: $page
+          perPage: $perPage
+          filters: {isTriggered: true, endDate: {before: $beforeEndDate, after: $afterEndDate}}
+        ) {
+          edges {
+            node {
+              ...pedtResultFragment
+            }
+          }
+          pageInfo {
+            currentPage
+            totalPages
+          }
+        }
+      }
+    }
+  }
+}

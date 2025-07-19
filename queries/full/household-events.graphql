@@ -1,0 +1,55 @@
+fragment EventFragment on EventInformation {
+  id
+  startTime
+  machine {
+    id
+  }
+  normalisedClassification {
+    isCat
+    isPartialCat
+    isElimination
+    elimType
+    cat {
+      id
+    }
+    visitDuration
+    isMaintenance
+    isScooping
+  }
+  classifications {
+    weight
+    isCat
+  }
+  labels {
+    tags
+    isCat
+    cat {
+      id
+    }
+  }
+}
+
+query RetrieveEvents($jwt: String!, $page: Int!, $perPage: Int!, $toDateTime: DateTime!, $fromDateTime: DateTime!, $filters: HouseholdEventFilteringOptions) {
+  authenticate(jwt: $jwt) {
+    myHousehold {
+      events(
+        to: $toDateTime
+        from: $fromDateTime
+        page: $page
+        perPage: $perPage
+        sort: START_TIME_DESC
+        filters: $filters
+      ) {
+        pageInfo {
+          totalPages
+          currentPage
+        }
+        edges {
+          node {
+            ...EventFragment
+          }
+        }
+      }
+    }
+  }
+}

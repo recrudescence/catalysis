@@ -1,0 +1,42 @@
+query RetrieveInsightData($jwt: String, $catId: ID!, $fromDate: Date, $toDate: Date, $prevFromDate: Date, $prevToDate: Date, $resolution: AggregateResolutionEnum) {
+  authenticate(jwt: $jwt) {
+    node(id: $catId) {
+      ... on Cat {
+        id
+        name
+        current: aggregatedEvents(from: $fromDate, to: $toDate, resolution: $resolution) {
+          weight {
+            date
+            numDays
+            min
+            max
+            mean
+            unfilteredCounts {
+              total
+              urination
+              defecation
+              nonElimination
+            }
+          }
+        }
+        previous: aggregatedEvents(
+          from: $prevFromDate
+          to: $prevToDate
+          resolution: MONTH
+        ) {
+          weight {
+            date
+            mean
+          }
+        }
+        events(sort: START_TIME_DESC, first: 1) {
+          edges {
+            node {
+              startTime
+            }
+          }
+        }
+      }
+    }
+  }
+}

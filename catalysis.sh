@@ -189,23 +189,164 @@ petivity_api() {
     fi
 }
 
+# Helper function to load GraphQL query from file
+load_query() {
+    local query_file="$1"
+    if [[ ! -f "$query_file" ]]; then
+        echo "Error: $query_file file not found" >&2
+        return 1
+    fi
+    cat "$query_file"
+}
+
 # Status command - gets cats and machines overview
 petivity_status() {
-    # Use printf and jq -Rs to properly escape the JWT token
     local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
     local variables=$(jq -n --argjson jwt "$escaped_jwt" '{jwt: $jwt}')
     
-    # Load the GraphQL query from file
-    if [[ ! -f "./queries/status.graphql" ]]; then
-        echo "Error: ./queries/status.graphql file not found"
+    local query=$(load_query "./queries/status.graphql") || return 1
+    
+    local json_query=$(jq -n \
+        --arg operationName "RetrievePetsMachine" \
+        --argjson variables "$variables" \
+        --arg query "$query" \
+        '{operationName: $operationName, variables: $variables, query: $query}')
+    
+    petivity_api "$json_query"
+}
+
+# Cat weight aggregation command
+petivity_weight() {
+    local cat_id="$1"
+    local from_date="$2"
+    local to_date="$3"
+    local resolution="${4:-DAY}"
+    
+    if [[ -z "$cat_id" || -z "$from_date" || -z "$to_date" ]]; then
+        echo "Usage: catalysis weight <cat_id> <from_date> <to_date> [resolution]"
+        echo "Example: catalysis weight Q2F0OmU1NmFlN2UyLWNlMjctNGQ1ZC1hZmRhLTVmYTQ1MzcyMjEyZg== 2025-06-14 2025-07-14 DAY"
         return 1
     fi
     
-    local query=$(cat ./queries/status.graphql)
+    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    local variables=$(jq -n \
+        --argjson jwt "$escaped_jwt" \
+        --arg catId "$cat_id" \
+        --arg fromDate "$from_date" \
+        --arg toDate "$to_date" \
+        --arg resolution "$resolution" \
+        '{jwt: $jwt, catId: $catId, fromDate: $fromDate, toDate: $toDate, resolution: $resolution}')
     
-    # Use jq to properly escape the query string
+    local query=$(load_query "./queries/cat-weight.graphql") || return 1
+    
     local json_query=$(jq -n \
-        --arg operationName "RetrievePetsMachine" \
+        --arg operationName "RetrieveCatUnfilteredAggWeight" \
+        --argjson variables "$variables" \
+        --arg query "$query" \
+        '{operationName: $operationName, variables: $variables, query: $query}')
+    
+    petivity_api "$json_query"
+}
+
+# Cat PEDT results command
+petivity_alerts() {
+    local cat_id="$1"
+    local after_date="$2"
+    local before_date="$3"
+    local page="${4:-1}"
+    local per_page="${5:-1000}"
+    
+    if [[ -z "$cat_id" || -z "$after_date" || -z "$before_date" ]]; then
+        echo "Usage: catalysis alerts <cat_id> <after_date> <before_date> [page] [per_page]"
+        echo "Example: catalysis alerts Q2F0OmU1NmFlN2UyLWNlMjctNGQ1ZC1hZmRhLTVmYTQ1MzcyMjEyZg== 2025-07-01 2025-07-31"
+        return 1
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    local variables=$(jq -n \
+        --argjson jwt "$escaped_jwt" \
+        --arg catId "$cat_id" \
+        --arg afterEndDate "$after_date" \
+        --arg beforeEndDate "$before_date" \
+        --argjson page "$page" \
+        --argjson perPage "$per_page" \
+        '{jwt: $jwt, catId: $catId, afterEndDate: $afterEndDate, beforeEndDate: $beforeEndDate, page: $page, perPage: $perPage}')
+    
+    local query=$(load_query "./queries/cat-alerts.graphql") || return 1
+    
+    local json_query=$(jq -n \
+        --arg operationName "RetrieveCatPedtResults" \
+        --argjson variables "$variables" \
+        --arg query "$query" \
+        '{operationName: $operationName, variables: $variables, query: $query}')
+    
+    petivity_api "$json_query"
+}
+
+# Cat insight data command
+petivity_insights() {
+    local cat_id="$1"
+    local from_date="$2"
+    local to_date="$3"
+    local prev_from_date="$4"
+    local prev_to_date="$5"
+    local resolution="${6:-DAY}"
+    
+    if [[ -z "$cat_id" || -z "$from_date" || -z "$to_date" || -z "$prev_from_date" || -z "$prev_to_date" ]]; then
+        echo "Usage: catalysis insights <cat_id> <from_date> <to_date> <prev_from_date> <prev_to_date> [resolution]"
+        echo "Example: catalysis insights Q2F0OmU1NmFlN2UyLWNlMjctNGQ1ZC1hZmRhLTVmYTQ1MzcyMjEyZg== 2025-07-01 2025-07-31 2025-06-01 2025-06-30 DAY"
+        return 1
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    local variables=$(jq -n \
+        --argjson jwt "$escaped_jwt" \
+        --arg catId "$cat_id" \
+        --arg fromDate "$from_date" \
+        --arg toDate "$to_date" \
+        --arg prevFromDate "$prev_from_date" \
+        --arg prevToDate "$prev_to_date" \
+        --arg resolution "$resolution" \
+        '{jwt: $jwt, catId: $catId, fromDate: $fromDate, toDate: $toDate, prevFromDate: $prevFromDate, prevToDate: $prevToDate, resolution: $resolution}')
+    
+    local query=$(load_query "./queries/cat-insights.graphql") || return 1
+    
+    local json_query=$(jq -n \
+        --arg operationName "RetrieveInsightData" \
+        --argjson variables "$variables" \
+        --arg query "$query" \
+        '{operationName: $operationName, variables: $variables, query: $query}')
+    
+    petivity_api "$json_query"
+}
+
+# Household events command
+petivity_events() {
+    local from_datetime="$1"
+    local to_datetime="$2"
+    local page="${3:-1}"
+    local per_page="${4:-100}"
+    
+    if [[ -z "$from_datetime" || -z "$to_datetime" ]]; then
+        echo "Usage: catalysis events <from_datetime> <to_datetime> [page] [per_page]"
+        echo "Example: catalysis events '2025-07-10T23:36:47.212Z' '2025-07-14T23:36:47.212Z'"
+        return 1
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    local variables=$(jq -n \
+        --argjson jwt "$escaped_jwt" \
+        --arg fromDateTime "$from_datetime" \
+        --arg toDateTime "$to_datetime" \
+        --argjson page "$page" \
+        --argjson perPage "$per_page" \
+        --arg filters '{"excludeFalseTriggerClassifications": true, "aiClassificationIsCat": true}' \
+        '{jwt: $jwt, fromDateTime: $fromDateTime, toDateTime: $toDateTime, page: $page, perPage: $perPage, filters: ($filters | fromjson)}')
+    
+    local query=$(load_query "./queries/household-events.graphql") || return 1
+    
+    local json_query=$(jq -n \
+        --arg operationName "RetrieveEvents" \
         --argjson variables "$variables" \
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
@@ -243,6 +384,30 @@ case "${1:-help}" in
         fi
         petivity_status
         ;;
+    "weight")
+        if [[ "$6" == "--dry-run" ]]; then
+            DRY_RUN=true
+        fi
+        petivity_weight "$2" "$3" "$4" "$5"
+        ;;
+    "alerts")
+        if [[ "$7" == "--dry-run" ]]; then
+            DRY_RUN=true
+        fi
+        petivity_alerts "$2" "$3" "$4" "$5" "$6"
+        ;;
+    "insights")
+        if [[ "$8" == "--dry-run" ]]; then
+            DRY_RUN=true
+        fi
+        petivity_insights "$2" "$3" "$4" "$5" "$6" "$7"
+        ;;
+    "events")
+        if [[ "$6" == "--dry-run" ]]; then
+            DRY_RUN=true
+        fi
+        petivity_events "$2" "$3" "$4" "$5"
+        ;;
     "refresh")
         petivity_refresh
         ;;
@@ -252,29 +417,39 @@ case "${1:-help}" in
     "help"|*)
         echo "Petivity API Helper - Usage:"
         echo ""
-        echo "  catalysis <command> [--dry-run]"
+        echo "  catalysis <command> [options] [--dry-run]"
         echo ""
         echo "Commands:"
-        echo "  status        Get overview of cats and machines"
-        echo "  refresh       Manually refresh access token"
-        echo "  token-info    Show current token information and expiration"
+        echo "  status                              Get overview of cats and machines"
+        echo "  weight <cat_id> <from> <to> [res]   Get cat weight data over time"
+        echo "  alerts <cat_id> <after> <before>    Get PEDT health alerts for cat"
+        echo "  insights <cat_id> <from> <to> <prev_from> <prev_to> [res]"
+        echo "                                      Get detailed analytics with comparisons"
+        echo "  events <from_datetime> <to_datetime> [page] [per_page]"
+        echo "                                      Get household events"
+        echo "  refresh                             Manually refresh access token"
+        echo "  token-info                          Show current token information"
         echo ""
         echo "Options:"
         echo "  --dry-run     Print the curl command that would be executed"
+        echo ""
+        echo "Examples:"
+        echo "  catalysis status"
+        echo "  catalysis weight Q2F0... 2025-06-14 2025-07-14 DAY"
+        echo "  catalysis alerts Q2F0... 2025-07-01 2025-07-31"
+        echo "  catalysis insights Q2F0... 2025-07-01 2025-07-31 2025-06-01 2025-06-30"
+        echo "  catalysis events '2025-07-10T23:36:47.212Z' '2025-07-14T23:36:47.212Z'"
         echo ""
         echo "Environment variables needed:"
         echo "  PETIVITY_JWT                 (required) Current access token"
         echo "  PETIVITY_CLIENT_ID           (required) For automatic token refresh"
         echo "  PETIVITY_REFRESH_TOKEN       (required) For automatic token refresh"
         echo ""
-        echo "Examples:"
-        echo "  catalysis status"
-        echo "  catalysis status --dry-run"
-        echo "  catalysis refresh"
-        echo "  catalysis token-info"
-        echo ""
-        echo "Auto-refresh behavior:"
-        echo "  - If refresh token is set, expired access tokens will auto-refresh"
-        echo "  - If refresh token is not set, you'll need to manually update JWT"
+        echo "Query files needed in ./queries/:"
+        echo "  status.graphql"
+        echo "  cat-weight-aggregation.graphql"
+        echo "  cat-pedt-results.graphql"
+        echo "  cat-insight-data.graphql"
+        echo "  household-events.graphql"
         ;;
 esac

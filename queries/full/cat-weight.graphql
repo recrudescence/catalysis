@@ -1,0 +1,15 @@
+query RetrieveCatUnfilteredAggWeight($jwt: String, $catId: ID!, $fromDate: Date, $toDate: Date, $resolution: AggregateResolutionEnum) {
+  authenticate(jwt: $jwt) {
+    node(id: $catId) {
+      ... on Cat {
+        id
+        name
+        aggregatedEvents(from: $fromDate, to: $toDate, resolution: $resolution) {
+          weight {
+            mean
+          }
+        }
+      }
+    }
+  }
+}
