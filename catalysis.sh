@@ -112,7 +112,7 @@ auto_refresh_if_needed() {
 }
 
 # Base curl function for all API calls
-petivity_api() {
+catalysis_api() {
     local query="$1"
     
     # Check and refresh token if needed (unless in dry run mode)
@@ -200,7 +200,7 @@ load_query() {
 }
 
 # Status command - gets cats and machines overview
-petivity_status() {
+catalysis_status() {
     local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
     local variables=$(jq -n --argjson jwt "$escaped_jwt" '{jwt: $jwt}')
     
@@ -212,11 +212,11 @@ petivity_status() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    petivity_api "$json_query"
+    catalysis_api "$json_query"
 }
 
 # Cat weight aggregation command
-petivity_weight() {
+catalysis_weight() {
     local cat_id="$1"
     local from_date="$2"
     local to_date="$3"
@@ -245,11 +245,11 @@ petivity_weight() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    petivity_api "$json_query"
+    catalysis_api "$json_query"
 }
 
 # Cat PEDT results command
-petivity_alerts() {
+catalysis_alerts() {
     local cat_id="$1"
     local after_date="$2"
     local before_date="$3"
@@ -280,11 +280,11 @@ petivity_alerts() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    petivity_api "$json_query"
+    catalysis_api "$json_query"
 }
 
 # Cat insight data command
-petivity_insights() {
+catalysis_insights() {
     local cat_id="$1"
     local from_date="$2"
     local to_date="$3"
@@ -317,11 +317,11 @@ petivity_insights() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    petivity_api "$json_query"
+    catalysis_api "$json_query"
 }
 
 # Household events command
-petivity_events() {
+catalysis_events() {
     local from_datetime="$1"
     local to_datetime="$2"
     local page="${3:-1}"
@@ -351,16 +351,16 @@ petivity_events() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    petivity_api "$json_query"
+    catalysis_api "$json_query"
 }
 
 # Manual token refresh command
-petivity_refresh() {
+catalysis_refresh() {
     refresh_token
 }
 
 # Token info command
-petivity_token_info() {
+catalysis_token_info() {
     echo "=== Current Token Information ==="
     echo "JWT length: ${#PETIVITY_JWT} chars"
     echo "JWT preview: ${PETIVITY_JWT:0:20}...${PETIVITY_JWT: -20}"
@@ -382,37 +382,37 @@ case "${1:-help}" in
         if [[ "$2" == "--dry-run" ]]; then
             DRY_RUN=true
         fi
-        petivity_status
+        catalysis_status
         ;;
     "weight")
         if [[ "$6" == "--dry-run" ]]; then
             DRY_RUN=true
         fi
-        petivity_weight "$2" "$3" "$4" "$5"
+        catalysis_weight "$2" "$3" "$4" "$5"
         ;;
     "alerts")
         if [[ "$7" == "--dry-run" ]]; then
             DRY_RUN=true
         fi
-        petivity_alerts "$2" "$3" "$4" "$5" "$6"
+        catalysis_alerts "$2" "$3" "$4" "$5" "$6"
         ;;
     "insights")
         if [[ "$8" == "--dry-run" ]]; then
             DRY_RUN=true
         fi
-        petivity_insights "$2" "$3" "$4" "$5" "$6" "$7"
+        catalysis_insights "$2" "$3" "$4" "$5" "$6" "$7"
         ;;
     "events")
         if [[ "$6" == "--dry-run" ]]; then
             DRY_RUN=true
         fi
-        petivity_events "$2" "$3" "$4" "$5"
+        catalysis_events "$2" "$3" "$4" "$5"
         ;;
     "refresh")
-        petivity_refresh
+        catalysis_refresh
         ;;
     "token-info")
-        petivity_token_info
+        catalysis_token_info
         ;;
     "help"|*)
         echo "Petivity API Helper - Usage:"
