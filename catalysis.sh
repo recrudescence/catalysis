@@ -196,12 +196,12 @@ petivity_status() {
     local variables=$(jq -n --argjson jwt "$escaped_jwt" '{jwt: $jwt}')
     
     # Load the GraphQL query from file
-    if [[ ! -f "status.graphql" ]]; then
-        echo "Error: status.graphql file not found"
+    if [[ ! -f "./queries/status.graphql" ]]; then
+        echo "Error: ./queries/status.graphql file not found"
         return 1
     fi
     
-    local query=$(cat status.graphql)
+    local query=$(cat ./queries/status.graphql)
     
     # Use jq to properly escape the query string
     local json_query=$(jq -n \

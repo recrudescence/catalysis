@@ -1,0 +1,46 @@
+fragment CatFragment on Cat {
+  id
+  name
+  activityState {
+    catNotSeenWarning
+    mostRecentEvent
+    lastActivated
+  }
+}
+
+fragment machineFragment on Machine {
+  name
+  batteryPercentage
+  showBatteryWarning
+  wifiRssi
+  powerMode
+  isFrozen
+  mostRecentUploadAt
+  mostRecentUploadWarning
+  isDirty
+  balancedStatus
+  eliminationEvents(sinceLastMaintenanceEvent: true) {
+    startTime
+    normalisedClassification {
+      isCat
+      isElimination
+      elimType
+      cat {
+        id
+      }
+    }
+  }
+}
+
+query RetrievePetsMachine($jwt: String) {
+  authenticate(jwt: $jwt) {
+    myHousehold {
+      cats {
+        ...CatFragment
+      }
+      machines(filters: {isFrozen: false}) {
+        ...machineFragment
+      }
+    }
+  }
+}
