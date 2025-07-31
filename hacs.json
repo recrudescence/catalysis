@@ -1,0 +1,8 @@
+{
+  "name": "Catalysis",
+  "content_in_root": false,
+  "filename": "catalysis",
+  "country": ["US", "CA", "GB"],
+  "homeassistant": "2025.7.2",
+  "render_readme": true
+}
