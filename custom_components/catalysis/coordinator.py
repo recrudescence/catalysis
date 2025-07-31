@@ -16,11 +16,11 @@ from .const import (
     STATUS_UPDATE_INTERVAL,
     WEIGHT_UPDATE_INTERVAL,
     WEIGHT_TIME_WINDOW,
-    CONF_SCRIPT_PATH,
-    CONF_WORKING_DIR,
     CONF_JWT,
     CONF_CLIENT_ID,
     CONF_REFRESH_TOKEN,
+    SCRIPT_RELATIVE_PATH,
+    QUERIES_RELATIVE_PATH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,8 +32,11 @@ class PetivityCoordinatorBase(DataUpdateCoordinator):
         """Initialize the coordinator."""
         self.hass = hass
         self.entry = entry
-        self._script_path = entry.data[CONF_SCRIPT_PATH]
-        self._working_dir = entry.data[CONF_WORKING_DIR]
+        
+        # Get integration directory and construct paths
+        integration_dir = os.path.dirname(__file__)
+        self._script_path = os.path.join(integration_dir, SCRIPT_RELATIVE_PATH)
+        self._working_dir = integration_dir
         
         super().__init__(
             hass,

@@ -4,8 +4,6 @@ DOMAIN = "petivity"
 PLATFORMS = ["sensor"]
 
 # Configuration keys
-CONF_SCRIPT_PATH = "script_path"
-CONF_WORKING_DIR = "working_dir"
 CONF_JWT = "petivity_jwt"
 CONF_CLIENT_ID = "petivity_client_id" 
 CONF_REFRESH_TOKEN = "petivity_refresh_token"
@@ -16,3 +14,7 @@ WEIGHT_UPDATE_INTERVAL = 24 * 60  # minutes (24 hours)
 
 # Default time windows for weight data
 WEIGHT_TIME_WINDOW = 7  # days
+
+# Bundled paths (relative to integration directory)
+SCRIPT_RELATIVE_PATH = "bin/catalysis"
+QUERIES_RELATIVE_PATH = "queries"
