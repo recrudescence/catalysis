@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 
 # Check if required environment variables are set
 if [[ -z "$PETIVITY_JWT" || -z "$PETIVITY_CLIENT_ID" || -z "$PETIVITY_REFRESH_TOKEN" ]]; then
