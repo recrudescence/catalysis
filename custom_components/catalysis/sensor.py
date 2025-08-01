@@ -23,30 +23,31 @@ async def async_setup_entry(
     
     entities = []
     
-    # Add status-based sensors
-    entities.extend([
-        PetivityCatCountSensor(status_coordinator, config_entry),
-        PetivityMachineCountSensor(status_coordinator, config_entry),
-    ])
-    
-    # Add cat activity sensors
-    for cat in status_coordinator.get_cats():
+    # Dynamically create cat sensors based on discovered cats
+    cats = status_coordinator.get_cats()
+    for cat in cats:
+        cat_id = cat["id"]
         entities.extend([
-            PetivityCatActivitySensor(status_coordinator, config_entry, cat["id"]),
+            PetivityCatActivitySensor(status_coordinator, config_entry, cat_id),
+            PetivityCatWeightSensor(weight_coordinator, config_entry, cat_id),
         ])
     
-    # Add machine status sensors
-    for machine in status_coordinator.get_machines():
-        entities.extend([
-            PetivityMachineStatusSensor(status_coordinator, config_entry, machine["id"]),
-            PetivityMachineBatterySensor(status_coordinator, config_entry, machine["id"]),
-            PetivityMachineEventCountSensor(status_coordinator, config_entry, machine["id"]),
-        ])
-    
-    # Add weight sensors for each cat
-    for cat in status_coordinator.get_cats():
+    # Dynamically create machine sensors based on discovered machines  
+    machines = status_coordinator.get_machines()
+    for machine in machines:
+        machine_id = machine["id"]
         entities.append(
-            PetivityCatWeightSensor(weight_coordinator, config_entry, cat["id"])
+            PetivityMachineStatusSensor(status_coordinator, config_entry, machine_id)
+        )
+        
+        # Only add battery sensor if machine has battery (not AC powered)
+        if machine.get("battery_percentage") is not None:
+            entities.append(
+                PetivityMachineBatterySensor(status_coordinator, config_entry, machine_id)
+            )
+        
+        entities.append(
+            PetivityMachineEventCountSensor(status_coordinator, config_entry, machine_id)
         )
     
     async_add_entities(entities)
@@ -70,36 +71,6 @@ class PetivitySensorBase(CoordinatorEntity, SensorEntity):
             "manufacturer": "Petivity",
             "sw_version": "1.0.0",
         }
-
-class PetivityCatCountSensor(PetivitySensorBase):
-    """Sensor for number of cats."""
-    
-    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        """Initialize cat count sensor."""
-        super().__init__(coordinator, config_entry, "cat_count")
-        self._attr_name = "Petivity Cat Count"
-        self._attr_icon = "mdi:cat"
-    
-    @property
-    def native_value(self) -> Optional[int]:
-        """Return the number of cats."""
-        cats = self.coordinator.get_cats()
-        return len(cats) if cats else None
-
-class PetivityMachineCountSensor(PetivitySensorBase):
-    """Sensor for number of machines."""
-    
-    def __init__(self, coordinator, config_entry: ConfigEntry) -> None:
-        """Initialize machine count sensor."""
-        super().__init__(coordinator, config_entry, "machine_count")
-        self._attr_name = "Petivity Machine Count"
-        self._attr_icon = "mdi:devices"
-    
-    @property
-    def native_value(self) -> Optional[int]:
-        """Return the number of machines."""
-        machines = self.coordinator.get_machines()
-        return len(machines) if machines else None
 
 class PetivityMachineStatusSensor(PetivitySensorBase):
     """Sensor for individual machine status."""
