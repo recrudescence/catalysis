@@ -147,9 +147,31 @@ class PetivityStatusCoordinator(PetivityCoordinatorBase):
             machines_data = self.data.get("data", {}).get("authenticate", {}).get("myHousehold", {}).get("machines", [])
             
             for machine in machines_data:
-                # Get most recent elimination event for additional context
-                recent_events = machine.get("eliminationEvents", [])
-                most_recent_event = recent_events[0] if recent_events else None
+                # Parse elimination events for detailed tracking
+                elimination_events = machine.get("eliminationEvents", [])
+                
+                # Process events for easier access
+                processed_events = []
+                event_counts = {"urination": 0, "defecation": 0, "combo": 0, "unknown": 0}
+                
+                for event in elimination_events:
+                    classification = event.get("normalisedClassification", {})
+                    if classification.get("isCat") and classification.get("isElimination"):
+                        elim_type = classification.get("elimType", "unknown")
+                        cat_info = classification.get("cat", {})
+                        
+                        processed_event = {
+                            "start_time": event.get("startTime"),
+                            "elimination_type": elim_type,
+                            "cat_id": cat_info.get("id"),
+                        }
+                        processed_events.append(processed_event)
+                        
+                        # Count by type
+                        event_counts[elim_type] = event_counts.get(elim_type, 0) + 1
+                
+                # Get most recent event details
+                most_recent_event = processed_events[0] if processed_events else None
                 
                 machines.append({
                     "id": machine.get("name", "unknown"),  # Using name as ID since no explicit ID field
@@ -163,8 +185,15 @@ class PetivityStatusCoordinator(PetivityCoordinatorBase):
                     "upload_warning": machine.get("mostRecentUploadWarning", False),
                     "is_dirty": machine.get("isDirty", False),
                     "balanced_status": machine.get("balancedStatus"),
-                    "recent_event_time": most_recent_event.get("startTime") if most_recent_event else None,
-                    "recent_event_count": len(recent_events),
+                    
+                    # Enhanced event tracking
+                    "recent_events": processed_events,
+                    "recent_event_count": len(processed_events),
+                    "event_counts": event_counts,
+                    "most_recent_event": most_recent_event,
+                    "last_event_time": most_recent_event.get("start_time") if most_recent_event else None,
+                    "last_event_type": most_recent_event.get("elimination_type") if most_recent_event else None,
+                    "last_event_cat_id": most_recent_event.get("cat_id") if most_recent_event else None,
                 })
         except (KeyError, TypeError) as err:
             _LOGGER.warning("Failed to extract machine data: %s", err)
@@ -248,7 +277,79 @@ class PetivityWeightCoordinator(PetivityCoordinatorBase):
         except (KeyError, TypeError, IndexError) as err:
             _LOGGER.warning("Failed to extract weight for cat %s: %s", cat_name, err)
         
+class PetivityMachineLastEventSensor(PetivitySensorBase):
+    """Sensor for machine's last elimination event details."""
+    
+    def __init__(self, coordinator, config_entry: ConfigEntry, machine_id: str) -> None:
+        """Initialize machine last event sensor."""
+        self._machine_id = machine_id
+        super().__init__(coordinator, config_entry, f"machine_{machine_id.lower().replace(' ', '_')}_last_event")
+        self._attr_icon = "mdi:information"
+    
+    @property
+    def name(self) -> Optional[str]:
+        """Return sensor name."""
+        machines = self.coordinator.get_machines()
+        for machine in machines:
+            if machine["id"] == self._machine_id:
+                return f"Petivity {machine.get('name', 'Machine')} Last Event"
+        return f"Petivity Machine {self._machine_id} Last Event"
+    
+    @property
+    def native_value(self) -> Optional[str]:
+        """Return last event type."""
+        machines = self.coordinator.get_machines()
+        for machine in machines:
+            if machine["id"] == self._machine_id:
+                event_type = machine.get("last_event_type")
+                if event_type:
+                    return event_type.title()  # Capitalize first letter
+                return "None"
         return None
+    
+    @property
+    def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
+        """Return detailed event information."""
+        machines = self.coordinator.get_machines()
+        for machine in machines:
+            if machine["id"] == self._machine_id:
+                # Get cat name for the last event
+                cat_name = "Unknown"
+                if machine.get("last_event_cat_id"):
+                    cats = self.coordinator.get_cats()
+                    for cat in cats:
+                        if cat["id"] == machine["last_event_cat_id"]:
+                            cat_name = cat["name"]
+                            break
+                
+                return {
+                    "machine_id": machine["id"],
+                    "machine_name": machine.get("name"),
+                    "last_event_time": machine.get("last_event_time"),
+                    "last_event_type": machine.get("last_event_type"),
+                    "last_event_cat": cat_name,
+                    "last_event_cat_id": machine.get("last_event_cat_id"),
+                    
+                    # Event counts by type
+                    "urination_count": machine.get("event_counts", {}).get("urination", 0),
+                    "defecation_count": machine.get("event_counts", {}).get("defecation", 0),
+                    "combo_count": machine.get("event_counts", {}).get("combo", 0),
+                    "unknown_count": machine.get("event_counts", {}).get("unknown", 0),
+                    "total_events": machine.get("recent_event_count", 0),
+                    
+                    # All recent events (limited to last 10 for performance)
+                    "recent_events": machine.get("recent_events", [])[:10],
+                }
+        return None
+    
+    @property
+    def available(self) -> bool:
+        """Return if sensor is available."""
+        machines = self.coordinator.get_machines()
+        for machine in machines:
+            if machine["id"] == self._machine_id:
+                return machine.get("recent_event_count", 0) > 0
+        return False
     
     def get_cat_weight(self, cat_id: str) -> Optional[float]:
         """Get current weight for a specific cat."""
