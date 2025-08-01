@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import stat
 import subprocess
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -38,12 +39,38 @@ class PetivityCoordinatorBase(DataUpdateCoordinator):
         self._script_path = os.path.join(integration_dir, SCRIPT_RELATIVE_PATH)
         self._working_dir = integration_dir
         
+        # Ensure script is executable on initialization
+        self._ensure_script_executable()
+        
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN}_coordinator",
             update_interval=timedelta(minutes=update_interval_minutes),
         )
+    
+    def _ensure_script_executable(self) -> None:
+        """Ensure the script has executable permissions."""
+        try:
+            import stat
+            
+            if os.path.exists(self._script_path):
+                # Get current permissions
+                current_permissions = os.stat(self._script_path).st_mode
+                
+                # Add execute permissions for owner, group, and others
+                executable_permissions = current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+                
+                # Only change if needed
+                if current_permissions != executable_permissions:
+                    os.chmod(self._script_path, executable_permissions)
+                    _LOGGER.info("Made script executable: %s", self._script_path)
+                else:
+                    _LOGGER.debug("Script already executable: %s", self._script_path)
+            else:
+                _LOGGER.warning("Script not found at: %s", self._script_path)
+        except Exception as err:
+            _LOGGER.error("Failed to make script executable: %s", err)
     
     def _get_environment(self) -> Dict[str, str]:
         """Get environment variables for the script."""
@@ -90,16 +117,32 @@ class PetivityCoordinatorBase(DataUpdateCoordinator):
             raise UpdateFailed(f"Command execution failed: {err}")
     
     def _execute_command(self, cmd: List[str], env: Dict[str, str]) -> subprocess.CompletedProcess:
-        """Execute command synchronously."""
-        return subprocess.run(
-            cmd,
-            cwd=self._working_dir,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=120,  # 2 minute timeout (allows for token refresh)
-            check=False,
-        )
+        """Execute command synchronously with permission retry."""
+        try:
+            return subprocess.run(
+                cmd,
+                cwd=self._working_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except PermissionError:
+            # Try to fix permissions and retry once
+            _LOGGER.warning("Permission denied, attempting to fix script permissions and retry")
+            self._ensure_script_executable()
+            
+            # Retry the command
+            return subprocess.run(
+                cmd,
+                cwd=self._working_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
 
 class PetivityStatusCoordinator(PetivityCoordinatorBase):
     """Coordinator for status data (cats and machines)."""
