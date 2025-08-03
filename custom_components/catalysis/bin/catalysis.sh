@@ -363,7 +363,7 @@ catalysis_refresh() {
 catalysis_token_info() {
     echo "=== Current Token Information ==="
     echo "JWT length: ${#PETIVITY_JWT} chars"
-    echo "JWT preview: ${PETIVITY_JWT:0:20}...${PETIVITY_JWT: -20}"
+    echo "JWT: ${PETIVITY_JWT}"
     
     if [[ -n "$PETIVITY_REFRESH_TOKEN" ]]; then
         echo "Refresh token length: ${#PETIVITY_REFRESH_TOKEN} chars"
@@ -447,9 +447,9 @@ case "${1:-help}" in
         echo ""
         echo "Query files needed in ./queries/:"
         echo "  status.graphql"
-        echo "  cat-weight-aggregation.graphql"
-        echo "  cat-pedt-results.graphql"
-        echo "  cat-insight-data.graphql"
+        echo "  cat-weight.graphql"
+        echo "  cat-alerts.graphql"
+        echo "  cat-insights.graphql"
         echo "  household-events.graphql"
         ;;
 esac

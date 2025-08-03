@@ -157,7 +157,9 @@ class PetivityStatusCoordinator(PetivityCoordinatorBase):
     
     def get_cats(self) -> List[Dict[str, Any]]:
         """Extract cat information from status data."""
+        # Add null check to prevent AttributeError
         if not self.data:
+            _LOGGER.debug("No status data available for cats")
             return []
         
         cats = []
@@ -181,7 +183,9 @@ class PetivityStatusCoordinator(PetivityCoordinatorBase):
     
     def get_machines(self) -> List[Dict[str, Any]]:
         """Extract machine information from status data."""
+        # Add null check to prevent AttributeError
         if not self.data:
+            _LOGGER.debug("No status data available for machines")
             return []
         
         machines = []
@@ -319,4 +323,17 @@ class PetivityWeightCoordinator(PetivityCoordinatorBase):
             
         except (KeyError, TypeError, IndexError) as err:
             _LOGGER.warning("Failed to extract weight for cat %s: %s", cat_name, err)
-
+        
+        return None
+    
+    def get_cat_weight(self, cat_id: str) -> Optional[float]:
+        """Get current weight for a specific cat."""
+        if cat_id in self._cat_weights:
+            return self._cat_weights[cat_id].get("current_weight")
+        return None
+    
+    def get_cat_name(self, cat_id: str) -> Optional[str]:
+        """Get cat name for a specific cat ID."""
+        if cat_id in self._cat_weights:
+            return self._cat_weights[cat_id].get("cat_name")
+        return None

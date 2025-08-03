@@ -23,30 +23,47 @@ async def async_setup_entry(
     
     entities = []
     
-    # Dynamically create cat sensors based on discovered cats
-    cats = status_coordinator.get_cats()
-    for cat in cats:
-        cat_id = cat["id"]
-        entities.extend([
-            PetivityCatActivitySensor(status_coordinator, config_entry, cat_id),
-            PetivityCatWeightSensor(weight_coordinator, config_entry, cat_id),
-        ])
-    
-    # Dynamically create machine sensors based on discovered machines  
-    machines = status_coordinator.get_machines()
-    for machine in machines:
-        machine_id = machine["id"]
-        entities.extend([
-            PetivityMachineStatusSensor(status_coordinator, config_entry, machine_id),
-            PetivityMachineEventCountSensor(status_coordinator, config_entry, machine_id),
-            PetivityMachineLastEventSensor(status_coordinator, config_entry, machine_id),
-        ])
+    # Add defensive checks before accessing coordinator data
+    try:
+        # Dynamically create cat sensors based on discovered cats
+        cats = status_coordinator.get_cats()
+        for cat in cats:
+            cat_id = cat["id"]
+            entities.extend([
+                PetivityCatActivitySensor(status_coordinator, config_entry, cat_id),
+                PetivityCatWeightSensor(weight_coordinator, config_entry, cat_id),
+            ])
         
-        # Only add battery sensor if machine has battery (not AC powered)
-        if machine.get("battery_percentage") is not None:
-            entities.append(
-                PetivityMachineBatterySensor(status_coordinator, config_entry, machine_id)
-            )
+        # Dynamically create machine sensors based on discovered machines  
+        machines = status_coordinator.get_machines()
+        for machine in machines:
+            machine_id = machine["id"]
+            entities.extend([
+                PetivityMachineStatusSensor(status_coordinator, config_entry, machine_id),
+                PetivityMachineEventCountSensor(status_coordinator, config_entry, machine_id),
+                PetivityMachineLastEventSensor(status_coordinator, config_entry, machine_id),
+            ])
+            
+            # Only add battery sensor if machine has battery (not AC powered)
+            if machine.get("battery_percentage") is not None:
+                entities.append(
+                    PetivityMachineBatterySensor(status_coordinator, config_entry, machine_id)
+                )
+    
+    except Exception as err:
+        # Log error but still proceed with empty entity list if needed
+        from homeassistant.helpers import issue_registry as ir
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            "sensor_setup_error",
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="sensor_setup_error",
+            translation_placeholders={"error": str(err)},
+        )
+        # Still add entities if we have any
+        pass
     
     async_add_entities(entities)
 
@@ -162,7 +179,7 @@ class PetivityMachineStatusSensor(PetivitySensorBase):
                     "balanced_status": machine.get("balanced_status"),
                     "most_recent_upload": machine.get("most_recent_upload"),
                     "recent_events_today": machine.get("recent_event_count", 0),
-                    "last_event_time": machine.get("recent_event_time"),
+                    "last_event_time": machine.get("last_event_time"),
                 }
                 
                 # Only include battery percentage if it exists (some machines are AC powered)
@@ -200,7 +217,7 @@ class PetivityCatWeightSensor(PetivitySensorBase):
     @property
     def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
         """Return additional attributes."""
-        if self._cat_id in self.coordinator._cat_weights:
+        if hasattr(self.coordinator, '_cat_weights') and self._cat_id in self.coordinator._cat_weights:
             weight_data = self.coordinator._cat_weights[self._cat_id]
             return {
                 "cat_id": self._cat_id,
@@ -340,7 +357,7 @@ class PetivityMachineEventCountSensor(PetivitySensorBase):
                 return {
                     "machine_id": machine["id"],
                     "machine_name": machine.get("name"),
-                    "last_event_time": machine.get("recent_event_time"),
+                    "last_event_time": machine.get("last_event_time"),
                     "time_period": "recent_eliminations",
                 }
         return None
@@ -418,15 +435,3 @@ class PetivityMachineLastEventSensor(PetivitySensorBase):
             if machine["id"] == self._machine_id:
                 return machine.get("recent_event_count", 0) > 0
         return False
-    
-    def get_cat_weight(self, cat_id: str) -> Optional[float]:
-        """Get current weight for a specific cat."""
-        if cat_id in self._cat_weights:
-            return self._cat_weights[cat_id].get("current_weight")
-        return None
-    
-    def get_cat_name(self, cat_id: str) -> Optional[str]:
-        """Get cat name for a specific cat ID."""
-        if cat_id in self._cat_weights:
-            return self._cat_weights[cat_id].get("cat_name")
-        return None
