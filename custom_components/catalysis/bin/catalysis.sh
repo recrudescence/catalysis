@@ -4,7 +4,6 @@
 if [[ -z "$PETIVITY_JWT" || -z "$PETIVITY_CLIENT_ID" || -z "$PETIVITY_REFRESH_TOKEN" ]]; then
     echo "Error: Required environment variables not set."
     echo "Please set:"
-    echo "  export PETIVITY_JWT=\"your_jwt_token\""
     echo "  export PETIVITY_CLIENT_ID=\"your_client_id\""
     echo "  export PETIVITY_REFRESH_TOKEN=\"your_refresh_token\""
     exit 1
@@ -14,10 +13,10 @@ fi
 DRY_RUN=false
 
 
-# Token refresh function
+# Token refresh function - now returns the new token
 refresh_token() {
     if [[ -z "$PETIVITY_REFRESH_TOKEN" ]]; then
-        echo "Error: PETIVITY_REFRESH_TOKEN not set. Cannot refresh token."
+        echo "Error: PETIVITY_REFRESH_TOKEN not set. Cannot refresh token." >&2
         return 1
     fi
     
@@ -50,6 +49,7 @@ refresh_token() {
         echo "New token: ${new_token:0:20}...${new_token: -20}" >&2
         echo "You can update your environment with:" >&2
         echo "  export PETIVITY_JWT=\"$new_token\"" >&2
+        echo "$new_token"  # Return the new token
         return 0
     else
         echo "Token refresh failed:" >&2
@@ -80,13 +80,13 @@ is_token_expired() {
         local time_until_exp=$(( exp - current_time ))
         if [[ $time_until_exp -lt $buffer_time ]]; then
             if [[ $time_until_exp -lt 0 ]]; then
-                echo "Token expired $(( -time_until_exp )) seconds ago (at $(date -r $exp))" >&2
+                echo "Token expired $(( -time_until_exp )) seconds ago (at $(date -r $exp "+%Y-%m-%d %H:%M:%S"))" >&2
             else
-                echo "Token expires in $time_until_exp seconds (at $(date -r $exp))" >&2
+                echo "Token expires in $time_until_exp seconds (at $(date -r $exp "+%Y-%m-%d %H:%M:%S"))" >&2
             fi
             return 0  # Token is expired or expiring soon
         else
-            echo "Token expires at $(date -r $exp) (in $time_until_exp seconds)" >&2
+            echo "Token expires at $(date -r $exp "+%Y-%m-%d %H:%M:%S") (in $time_until_exp seconds)" >&2
             return 1  # Token is valid
         fi
     else
@@ -95,30 +95,31 @@ is_token_expired() {
     fi
 }
 
-# Auto-refresh token if needed
+# Auto-refresh token if needed - now returns the current valid token
 auto_refresh_if_needed() {
-    if is_token_expired "$PETIVITY_JWT"; then
+    local current_jwt="$1"
+    
+    if is_token_expired "$current_jwt"; then
         echo "Access token has expired or is expiring soon, attempting to refresh..." >&2
+        local new_token
         if new_token=$(refresh_token); then
-            PETIVITY_JWT="$new_token"
-            echo "Successfully refreshed token. Try again!" >&2
+            echo "Successfully refreshed token!" >&2
+            echo "$new_token"  # Return the new token
             return 0
         else
             echo "Failed to refresh token. Please manually update PETIVITY_JWT." >&2
             return 1
         fi
+    else
+        echo "$current_jwt"  # Return the original token if still valid
+        return 0
     fi
-    return 0
 }
 
 # Base curl function for all API calls
 catalysis_api() {
     local query="$1"
-    
-    # Check and refresh token if needed (unless in dry run mode)
-    if [[ "$DRY_RUN" != "true" ]]; then
-        auto_refresh_if_needed || return 1
-    fi
+    local jwt_token="$2"  # Accept JWT as parameter
 
     # Build curl command components
     local curl_cmd=(
@@ -156,8 +157,8 @@ catalysis_api() {
         echo ""
         echo "=== Environment Variables ==="
         echo "Client ID: $PETIVITY_CLIENT_ID"
-        echo "JWT length: ${#PETIVITY_JWT} chars"
-        echo "JWT preview: ${PETIVITY_JWT:0:10}...${PETIVITY_JWT: -10}"
+        echo "JWT length: ${#jwt_token} chars"
+        echo "JWT preview: ${jwt_token:0:10}...${jwt_token: -10}"
         if [[ -n "$PETIVITY_REFRESH_TOKEN" ]]; then
             echo "Refresh token length: ${#PETIVITY_REFRESH_TOKEN} chars"
             echo "Refresh token preview: ${PETIVITY_REFRESH_TOKEN:0:10}...${PETIVITY_REFRESH_TOKEN: -10}"
@@ -168,21 +169,6 @@ catalysis_api() {
     else
         local response=$("${curl_cmd[@]}")
         local exit_code=$?
-        
-        # Check for authentication errors
-        if echo "$response" | jq -e '.errors[]? | select(.extensions.code == "UNAUTHENTICATED")' >/dev/null 2>&1; then
-            echo "Authentication error detected. Token may be invalid or expired." >&2
-            if [[ -n "$PETIVITY_REFRESH_TOKEN" ]]; then
-                echo "Attempting to refresh token..." >&2
-                if new_token=$(refresh_token); then
-                    PETIVITY_JWT="$new_token"
-                    echo "Retrying API call with new token..." >&2
-                    # Update the query with new JWT
-                    local updated_query=$(echo "$query" | jq --arg jwt "$PETIVITY_JWT" '.variables.jwt = $jwt')
-                    response=$("${curl_cmd[@]}" --data-raw "$updated_query")
-                fi
-            fi
-        fi
         
         echo "$response" | jq '.'
         return $exit_code
@@ -201,7 +187,15 @@ load_query() {
 
 # Status command - gets cats and machines overview
 catalysis_status() {
-    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    # Get current valid token
+    local current_jwt
+    if [[ "$DRY_RUN" != "true" ]]; then
+        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
+    else
+        current_jwt="$PETIVITY_JWT"
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n --argjson jwt "$escaped_jwt" '{jwt: $jwt}')
     
     local query=$(load_query "./queries/status.graphql") || return 1
@@ -212,7 +206,7 @@ catalysis_status() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    catalysis_api "$json_query"
+    catalysis_api "$json_query" "$current_jwt"
 }
 
 # Cat weight aggregation command
@@ -228,7 +222,15 @@ catalysis_weight() {
         return 1
     fi
     
-    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    # Get current valid token
+    local current_jwt
+    if [[ "$DRY_RUN" != "true" ]]; then
+        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
+    else
+        current_jwt="$PETIVITY_JWT"
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
         --argjson jwt "$escaped_jwt" \
         --arg catId "$cat_id" \
@@ -245,7 +247,7 @@ catalysis_weight() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    catalysis_api "$json_query"
+    catalysis_api "$json_query" "$current_jwt"
 }
 
 # Cat PEDT results command
@@ -262,7 +264,15 @@ catalysis_alerts() {
         return 1
     fi
     
-    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    # Get current valid token
+    local current_jwt
+    if [[ "$DRY_RUN" != "true" ]]; then
+        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
+    else
+        current_jwt="$PETIVITY_JWT"
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
         --argjson jwt "$escaped_jwt" \
         --arg catId "$cat_id" \
@@ -280,7 +290,7 @@ catalysis_alerts() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    catalysis_api "$json_query"
+    catalysis_api "$json_query" "$current_jwt"
 }
 
 # Cat insight data command
@@ -298,7 +308,15 @@ catalysis_insights() {
         return 1
     fi
     
-    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    # Get current valid token
+    local current_jwt
+    if [[ "$DRY_RUN" != "true" ]]; then
+        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
+    else
+        current_jwt="$PETIVITY_JWT"
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
         --argjson jwt "$escaped_jwt" \
         --arg catId "$cat_id" \
@@ -317,7 +335,7 @@ catalysis_insights() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    catalysis_api "$json_query"
+    catalysis_api "$json_query" "$current_jwt"
 }
 
 # Household events command
@@ -333,7 +351,15 @@ catalysis_events() {
         return 1
     fi
     
-    local escaped_jwt=$(printf '%s' "$PETIVITY_JWT" | jq -Rs '.')
+    # Get current valid token
+    local current_jwt
+    if [[ "$DRY_RUN" != "true" ]]; then
+        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
+    else
+        current_jwt="$PETIVITY_JWT"
+    fi
+    
+    local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
         --argjson jwt "$escaped_jwt" \
         --arg fromDateTime "$from_datetime" \
@@ -351,7 +377,7 @@ catalysis_events() {
         --arg query "$query" \
         '{operationName: $operationName, variables: $variables, query: $query}')
     
-    catalysis_api "$json_query"
+    catalysis_api "$json_query" "$current_jwt"
 }
 
 # Manual token refresh command
