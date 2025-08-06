@@ -24,7 +24,7 @@ class PetivityConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         data_schema = vol.Schema({
-            vol.Required("petivity_jwt"): cv.string,
+            # vol.Required("petivity_jwt"): cv.string,
             vol.Required("petivity_client_id"): cv.string,
             vol.Required("petivity_refresh_token"): cv.string,
         })

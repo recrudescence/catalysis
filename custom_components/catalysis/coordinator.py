@@ -254,22 +254,31 @@ class PetivityWeightCoordinator(PetivityCoordinatorBase):
         """Initialize weight coordinator."""
         super().__init__(hass, entry, WEIGHT_UPDATE_INTERVAL)
         self._cat_weights = {}
-    
+
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch weight data for all cats."""
-        # Get cats from status coordinator
-        status_coordinator = self.hass.data[DOMAIN][self.entry.entry_id]["status_coordinator"]
-        cats = status_coordinator.get_cats()
-        
-        if not cats:
-            _LOGGER.warning("No cats found for weight data")
-            return {}
+        # Get cats from status coordinator with proper error handling
+        try:
+            status_coordinator = self.hass.data[DOMAIN][self.entry.entry_id]["status_coordinator"]
+            cats = status_coordinator.get_cats()
+            
+            if not cats:
+                _LOGGER.warning("No cats found for weight data - status coordinator may not be ready")
+                return self._cat_weights or {}  # Return existing data if available
+                
+        except KeyError as err:
+            _LOGGER.error("Status coordinator not found: %s", err)
+            return self._cat_weights or {}
+        except Exception as err:
+            _LOGGER.error("Error accessing status coordinator: %s", err) 
+            return self._cat_weights or {}
         
         # Calculate date range (last 7 days)
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=WEIGHT_TIME_WINDOW)
         
         weight_data = {}
+        successful_updates = 0
         
         for cat in cats:
             cat_id = cat["id"]
@@ -277,6 +286,7 @@ class PetivityWeightCoordinator(PetivityCoordinatorBase):
             
             try:
                 # Fetch weight data for this cat
+                _LOGGER.debug("Fetching weight data for cat %s (%s)", cat_name, cat_id)
                 weight_response = await self._run_catalysis_command(
                     "weight",
                     cat_id,
@@ -295,12 +305,17 @@ class PetivityWeightCoordinator(PetivityCoordinatorBase):
                     "last_updated": datetime.now().isoformat(),
                 }
                 
+                successful_updates += 1
+                _LOGGER.debug("Successfully updated weight for cat %s: %s lbs", cat_name, current_weight)
+                
             except Exception as err:
                 _LOGGER.error("Failed to fetch weight data for cat %s: %s", cat_name, err)
                 # Keep previous data if available
                 if cat_id in self._cat_weights:
                     weight_data[cat_id] = self._cat_weights[cat_id]
+                    _LOGGER.debug("Keeping previous weight data for cat %s", cat_name)
         
+        _LOGGER.debug("Weight coordinator updated data for %d/%d cats", successful_updates, len(cats))
         self._cat_weights = weight_data
         return weight_data
     

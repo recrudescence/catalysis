@@ -1,6 +1,7 @@
 """Sensor platform for Petivity integration."""
 from datetime import datetime
 from typing import Any, Dict, Optional
+import logging
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -11,47 +12,77 @@ from homeassistant.const import UnitOfMass
 
 from .const import DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Petivity sensors."""
-    coordinators = hass.data[DOMAIN][config_entry.entry_id]
-    status_coordinator = coordinators["status_coordinator"]
-    weight_coordinator = coordinators["weight_coordinator"]
-    
-    entities = []
-    
-    # Add defensive checks before accessing coordinator data
     try:
+        coordinators = hass.data[DOMAIN][config_entry.entry_id]
+        status_coordinator = coordinators["status_coordinator"]
+        weight_coordinator = coordinators["weight_coordinator"]
+        
+        entities = []
+        
+        # Verify coordinators have data
+        if not status_coordinator.data:
+            _LOGGER.error("Status coordinator has no data available")
+            return
+        
         # Dynamically create cat sensors based on discovered cats
         cats = status_coordinator.get_cats()
+        _LOGGER.debug("Setting up sensors for %d cats", len(cats))
+        
         for cat in cats:
             cat_id = cat["id"]
-            entities.extend([
-                PetivityCatActivitySensor(status_coordinator, config_entry, cat_id),
-                PetivityCatWeightSensor(weight_coordinator, config_entry, cat_id),
-            ])
+            cat_name = cat.get("name", "Unknown")
+            _LOGGER.debug("Creating sensors for cat: %s (ID: %s)", cat_name, cat_id)
+            
+            try:
+                entities.extend([
+                    PetivityCatActivitySensor(status_coordinator, config_entry, cat_id),
+                    PetivityCatWeightSensor(weight_coordinator, config_entry, cat_id),
+                ])
+            except Exception as err:
+                _LOGGER.error("Failed to create sensors for cat %s: %s", cat_name, err)
         
         # Dynamically create machine sensors based on discovered machines  
         machines = status_coordinator.get_machines()
+        _LOGGER.debug("Setting up sensors for %d machines", len(machines))
+        
         for machine in machines:
             machine_id = machine["id"]
-            entities.extend([
-                PetivityMachineStatusSensor(status_coordinator, config_entry, machine_id),
-                PetivityMachineEventCountSensor(status_coordinator, config_entry, machine_id),
-                PetivityMachineLastEventSensor(status_coordinator, config_entry, machine_id),
-            ])
+            machine_name = machine.get("name", "Unknown")
+            _LOGGER.debug("Creating sensors for machine: %s (ID: %s)", machine_name, machine_id)
             
-            # Only add battery sensor if machine has battery (not AC powered)
-            if machine.get("battery_percentage") is not None:
-                entities.append(
-                    PetivityMachineBatterySensor(status_coordinator, config_entry, machine_id)
-                )
+            try:
+                entities.extend([
+                    PetivityMachineStatusSensor(status_coordinator, config_entry, machine_id),
+                    PetivityMachineEventCountSensor(status_coordinator, config_entry, machine_id),
+                    PetivityMachineLastEventSensor(status_coordinator, config_entry, machine_id),
+                ])
+                
+                # Only add battery sensor if machine has battery (not AC powered)
+                if machine.get("battery_percentage") is not None:
+                    entities.append(
+                        PetivityMachineBatterySensor(status_coordinator, config_entry, machine_id)
+                    )
+            except Exception as err:
+                _LOGGER.error("Failed to create sensors for machine %s: %s", machine_name, err)
+        
+        if not entities:
+            _LOGGER.warning("No sensors were created - no cats or machines found")
+            return
+        
+        _LOGGER.info("Adding %d Petivity sensors", len(entities))
+        async_add_entities(entities, update_before_add=True)
     
     except Exception as err:
-        # Log error but still proceed with empty entity list if needed
+        _LOGGER.error("Critical error during sensor setup: %s", err)
+        # Create an issue in Home Assistant
         from homeassistant.helpers import issue_registry as ir
         ir.async_create_issue(
             hass,
@@ -59,13 +90,10 @@ async def async_setup_entry(
             "sensor_setup_error",
             is_fixable=False,
             severity=ir.IssueSeverity.ERROR,
-            translation_key="sensor_setup_error",
+            translation_key="sensor_setup_error", 
             translation_placeholders={"error": str(err)},
         )
-        # Still add entities if we have any
-        pass
-    
-    async_add_entities(entities)
+        raise
 
 class PetivitySensorBase(CoordinatorEntity, SensorEntity):
     """Base class for Petivity sensors."""
