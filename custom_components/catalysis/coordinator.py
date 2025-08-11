@@ -352,3 +352,69 @@ class PetivityWeightCoordinator(PetivityCoordinatorBase):
         if cat_id in self._cat_weights:
             return self._cat_weights[cat_id].get("cat_name")
         return None
+
+    async def async_get_historical_weight(self, cat_id: str, days: int = 30) -> List[Dict[str, Any]]:
+        """Fetch historical weight data for a specific cat over a given number of days."""
+        # Calculate date range
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=days)
+        
+        try:
+            # Fetch weight data using existing command
+            weight_response = await self._run_catalysis_command(
+                "weight",
+                cat_id,
+                start_date.isoformat(),
+                end_date.isoformat(),
+                "DAY"
+            )
+            
+            # Extract all historical weight measurements
+            historical_weights = self._extract_all_weight_measurements(weight_response)
+            
+            _LOGGER.debug(
+                "Retrieved %d historical weight measurements for cat %s over %d days",
+                len(historical_weights),
+                cat_id,
+                days
+            )
+            
+            return historical_weights
+            
+        except Exception as err:
+            _LOGGER.error("Failed to fetch historical weight data for cat %s: %s", cat_id, err)
+            return []
+
+    def _extract_all_weight_measurements(self, weight_response: Dict) -> List[Dict[str, Any]]:
+        """Extract all weight measurements from GraphQL response."""
+        measurements = []
+        
+        try:
+            # Parse actual GraphQL response structure
+            cat_data = weight_response.get("data", {}).get("authenticate", {}).get("node", {})
+            weight_data = cat_data.get("aggregatedEvents", {}).get("weight", [])
+            
+            for measurement in weight_data:
+                weight_grams = measurement.get("mean")
+                date_str = measurement.get("date")
+                
+                if weight_grams is not None and date_str is not None:
+                    # Convert grams to pounds
+                    weight_pounds = weight_grams * 0.00220462
+                    
+                    measurements.append({
+                        "date": date_str,
+                        "weight": round(weight_pounds, 2),
+                        "weight_grams": weight_grams,
+                        "min_weight": measurement.get("min", 0) * 0.00220462 if measurement.get("min") else None,
+                        "max_weight": measurement.get("max", 0) * 0.00220462 if measurement.get("max") else None,
+                        "num_days": measurement.get("numDays", 1),
+                    })
+            
+            # Sort by date (oldest first)
+            measurements.sort(key=lambda x: x["date"])
+            
+        except (KeyError, TypeError, IndexError) as err:
+            _LOGGER.warning("Failed to extract all weight measurements: %s", err)
+        
+        return measurements
