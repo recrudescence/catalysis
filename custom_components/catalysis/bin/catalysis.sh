@@ -58,61 +58,105 @@ refresh_token() {
     fi
 }
 
-# Check if JWT is expired or expiring soon
-is_token_expired() {
+# Check if JWT is still valid (not expired and not expiring soon)
+# Returns:
+#   0 = valid
+#   1 = expired or expiring soon
+#   2 = parse error (assume invalid)
+is_token_valid() {
     local jwt="$1"
     local current_time=$(date +%s)
     local buffer_time=300  # 5 minutes buffer
-    
+
     # Extract payload (second part of JWT)
     local payload=$(echo "$jwt" | cut -d'.' -f2)
-    
-    # Add padding if needed (JWT base64 might not be padded)
-    local padding_needed=$(( 4 - ${#payload} % 4 ))
-    if [[ $padding_needed -ne 4 ]]; then
-        payload="${payload}$(printf '%*s' $padding_needed | tr ' ' '=')"
-    fi
-    
+
+    # Convert from base64url -> base64
+    payload=$(echo "$payload" | tr '_-' '/+')
+
+    # Add padding if needed
+    local padding=$(( (4 - ${#payload} % 4) % 4 ))
+    payload="${payload}$(printf '%*s' "$padding" | tr ' ' '=')"
+
     # Decode and extract expiration
     local exp=$(echo "$payload" | base64 -d 2>/dev/null | jq -r '.exp // empty')
-    
+
     if [[ -n "$exp" && "$exp" != "null" ]]; then
         local time_until_exp=$(( exp - current_time ))
+
+        # cross-platform date
+        if date -d @"$exp" >/dev/null 2>&1; then
+            exp_date=$(date -d @"$exp" "+%Y-%m-%d %H:%M:%S")
+        else
+            exp_date=$(date -r "$exp" "+%Y-%m-%d %H:%M:%S")
+        fi
+
         if [[ $time_until_exp -lt $buffer_time ]]; then
             if [[ $time_until_exp -lt 0 ]]; then
-                echo "Token expired $(( -time_until_exp )) seconds ago (at $(date -r $exp "+%Y-%m-%d %H:%M:%S"))" >&2
+                echo "Token expired $((-time_until_exp)) seconds ago (at $exp_date)" >&2
             else
-                echo "Token expires in $time_until_exp seconds (at $(date -r $exp "+%Y-%m-%d %H:%M:%S"))" >&2
+                echo "Token expires in $time_until_exp seconds (at $exp_date)" >&2
             fi
-            return 0  # Token is expired or expiring soon
+            return 1  # expired or expiring soon
         else
-            echo "Token expires at $(date -r $exp "+%Y-%m-%d %H:%M:%S") (in $time_until_exp seconds)" >&2
-            return 1  # Token is valid
+            echo "Token valid until $exp_date (in $time_until_exp seconds)" >&2
+            return 0  # valid
         fi
     else
         echo "Warning: Could not parse token expiration" >&2
-        return 1  # Assume valid if can't parse
+        return 2  # parse error
     fi
 }
 
-# Auto-refresh token if needed - now returns the current valid token
+# Auto-refresh token if needed - returns the current valid token on stdout
 auto_refresh_if_needed() {
     local current_jwt="$1"
-    
-    if is_token_expired "$current_jwt"; then
-        echo "Access token has expired or is expiring soon, attempting to refresh..." >&2
+
+    if is_token_valid "$current_jwt"; then
+        echo "$current_jwt"
+        return 0
+    else
+        echo "Access token expired or expiring soon, attempting to refresh..." >&2
+
         local new_token
-        if new_token=$(refresh_token); then
-            echo "Successfully refreshed token!" >&2
-            echo "$new_token"  # Return the new token
-            return 0
+        if new_token=$(refresh_token 2>/dev/null); then
+            if [[ -n "$new_token" ]]; then
+                echo "Successfully refreshed token!" >&2
+                echo "$new_token"
+                return 0
+            else
+                echo "Refresh command succeeded but returned an empty token." >&2
+                return 1
+            fi
         else
-            echo "Failed to refresh token. Please manually update PETIVITY_JWT." >&2
+            echo "Failed to refresh login JWT token." >&2
+            echo "This may be due to an expired refresh_token. For now, create a new entry with your latest client_id and refresh_token." >&2
             return 1
         fi
-    else
-        echo "$current_jwt"  # Return the original token if still valid
+    fi
+}
+
+# Main helper: always tries to give you a usable token
+# Usage: token=$(get_valid_token "$current_token") || exit 1
+get_valid_token() {
+    local jwt="$1"
+    local token
+
+    if token=$(auto_refresh_if_needed "$jwt"); then
+        echo "$token"
         return 0
+    else
+        echo "Error: No valid token available." >&2
+        return 1
+    fi
+}
+
+get_petivity_jwt() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "$PETIVITY_JWT"
+        return 0
+    else
+        get_valid_token "$PETIVITY_JWT"
     fi
 }
 
@@ -187,13 +231,7 @@ load_query() {
 
 # Status command - gets cats and machines overview
 catalysis_status() {
-    # Get current valid token
-    local current_jwt
-    if [[ "$DRY_RUN" != "true" ]]; then
-        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
-    else
-        current_jwt="$PETIVITY_JWT"
-    fi
+    local current_jwt=$(get_petivity_jwt) || return 1
     
     local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n --argjson jwt "$escaped_jwt" '{jwt: $jwt}')
@@ -222,13 +260,7 @@ catalysis_weight() {
         return 1
     fi
     
-    # Get current valid token
-    local current_jwt
-    if [[ "$DRY_RUN" != "true" ]]; then
-        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
-    else
-        current_jwt="$PETIVITY_JWT"
-    fi
+    local current_jwt=$(get_petivity_jwt) || return 1
     
     local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
@@ -264,13 +296,7 @@ catalysis_alerts() {
         return 1
     fi
     
-    # Get current valid token
-    local current_jwt
-    if [[ "$DRY_RUN" != "true" ]]; then
-        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
-    else
-        current_jwt="$PETIVITY_JWT"
-    fi
+    local current_jwt=$(get_petivity_jwt) || return 1
     
     local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
@@ -308,13 +334,7 @@ catalysis_insights() {
         return 1
     fi
     
-    # Get current valid token
-    local current_jwt
-    if [[ "$DRY_RUN" != "true" ]]; then
-        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
-    else
-        current_jwt="$PETIVITY_JWT"
-    fi
+    local current_jwt=$(get_petivity_jwt) || return 1
     
     local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
@@ -351,13 +371,7 @@ catalysis_events() {
         return 1
     fi
     
-    # Get current valid token
-    local current_jwt
-    if [[ "$DRY_RUN" != "true" ]]; then
-        current_jwt=$(auto_refresh_if_needed "$PETIVITY_JWT") || return 1
-    else
-        current_jwt="$PETIVITY_JWT"
-    fi
+    local current_jwt=$(get_petivity_jwt) || return 1
     
     local escaped_jwt=$(printf '%s' "$current_jwt" | jq -Rs '.')
     local variables=$(jq -n \
@@ -399,7 +413,7 @@ catalysis_token_info() {
     fi
     
     echo ""
-    is_token_expired "$PETIVITY_JWT"
+    is_token_valid "$PETIVITY_JWT"
 }
 
 # Usage and help
